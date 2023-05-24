@@ -1,0 +1,66 @@
+#!/bin/bash
+
+BP_DIR=$(cd $(dirname ${0:-}); cd ..; pwd)
+BUILD_DIR=$1
+CACHE_DIR=$2
+ENV_DIR=$3
+PROFILE_PATH="$BUILD_DIR/.profile.d/libjq.sh"
+INSTALL_DIR="$BUILD_DIR/.heroku/vendor/lib"
+JQ_BUILD_VERSION=v1.6.0-onigmo-utf8proc
+
+if [ -f "$ENV_DIR/JQ_BUILD_VERSION" ]; then
+  JQ_BUILD_VERSION=`cat $ENV_DIR/JQ_BUILD_VERSION | tr -d '[[:space:]]'`
+  echo "Using JQ $JQ_BUILD_VERSION (from JQ_BUILD_VERSION env var)"
+else
+  echo "Using JQ $JQ_BUILD_VERSION (default)"
+fi
+
+echo "Create .profile.d"
+mkdir -p "$BUILD_DIR/.profile.d"
+
+# Usage: $ set-env key value
+set-env() {
+  echo "export $1=$2" >> $PROFILE_PATH
+}
+
+cd $BUILD_DIR
+
+cat <<EOF
+-----> Running buildpack https://github.com/invk/heroku-buildpack-libjq-onigmo
+
+BP_DIR = $BUILD_DIR
+BUILD_DIR = $BUILD_DIR
+CACHE_DIR = $CACHE_DIR
+EOF
+
+mkdir -p $INSTALL_DIR
+
+if [ ! -e /app/tmp/cache/usr/local/lib/libjq.so ]; then
+  echo
+  echo "-----> Download jq"
+  
+  curl -SL https://github.com/invk/jq/archive/refs/tags/$JQ_BUILD_VERSION.tar.gz | tar xvz
+  cd jq-*
+
+  echo
+  echo "-----> Build jq ($JQ_BUILD_VERSION)"
+
+  autoreconf -fi
+  ./configure --enable-shared --disable-maintainer-mode --disable-docs
+  make
+  make install DESTDIR=$CACHE_DIR
+fi
+
+mkdir -p $INSTALL_DIR
+rsync -avz /app/tmp/cache/usr/local/lib/ ${INSTALL_DIR}
+set-env LD_LIBRARY_PATH '/app/.heroku/vendor/lib:$LD_LIBRARY_PATH'
+
+echo
+echo "-----> Found installed jq library files:"
+find ${INSTALL_DIR}
+echo
+
+cat >${BP_DIR}/export <<EOF
+export LIBRARY_PATH="/app/tmp/cache/usr/local/lib:\${LIBRARY_PATH}"
+export CPATH="/app/tmp/cache/usr/local/include:\${CPATH}"
+EOF
